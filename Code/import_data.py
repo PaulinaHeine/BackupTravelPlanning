@@ -17,10 +17,24 @@ def import_data():
 
 agency_df, stops_df, routes_df, trips_df, stop_times_df, calendar_df = import_data()
 
+
+# Funktion zur Anpassung von Zeiten über 24 Stunden
+def adjust_time_to_next_day(time_str):
+    hours, minutes, seconds = map(int, time_str.split(":"))
+    if hours >= 24:
+        # Reduziere die Stunden um 24 und markiere als nächster Tag
+        hours -= 24
+        return f"{hours:02}:{minutes:02}:{seconds:02}", True  # True bedeutet "nächster Tag"
+    return time_str, False  # False bedeutet "gleicher Tag"
+
+
+
+
 # Beispielanzeige der Daten
 print("Stops Data:")
 print(stops_df.head())
 
 print("\nStop Times Data:")
 print(stop_times_df.head())
+
 
