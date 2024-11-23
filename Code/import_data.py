@@ -3,7 +3,7 @@ import pandas as pd
 
 def import_data():
     # @diana and denis, change to your directory
-    gtfs_dir = '/Users/paulinaheine/Codes/BackupTravelPlanning/gtfs_dummy_data/'
+    gtfs_dir = '/Users/paulinaheine/Codes/BackupTravelPlanning/GTFS_OP_2024_obb-2/'
 
     # load data
     agency_df = pd.read_csv(gtfs_dir + 'agency.txt')
@@ -12,10 +12,11 @@ def import_data():
     trips_df = pd.read_csv(gtfs_dir + 'trips.txt')
     stop_times_df = pd.read_csv(gtfs_dir + 'stop_times.txt')
     calendar_df = pd.read_csv(gtfs_dir + 'calendar.txt')
+    calendar_dates_df = pd.read_csv(gtfs_dir + 'calendar_dates.txt')
 
-    return agency_df, stops_df, routes_df, trips_df, stop_times_df, calendar_df
+    return agency_df, stops_df, routes_df, trips_df, stop_times_df, calendar_df, calendar_dates_df
 
-agency_df, stops_df, routes_df, trips_df, stop_times_df, calendar_df = import_data()
+agency_df, stops_df, routes_df, trips_df, stop_times_df, calendar_df, calendar_dates_df = import_data()
 
 
 # Funktion zur Anpassung von Zeiten über 24 Stunden
