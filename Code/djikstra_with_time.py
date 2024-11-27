@@ -87,8 +87,8 @@ def dijkstra_with_time(graph, start_name, end_name, start_time_minutes):
 # Hauptprogramm
 if __name__ == "__main__":
     # Benutzereingabe
-    start_stop_name = "Pöndorf Bahnhof"  #input("Geben Sie den Namen der Start-Haltestelle ein: ")
-    end_stop_name =  "Wolfshütte Bahnhst" #input("Geben Sie den Namen der Ziel-Haltestelle ein: ")
+    start_stop_name = "Schattendorf Kirchengasse"  #input("Geben Sie den Namen der Start-Haltestelle ein: ")
+    end_stop_name =  "Baumgarten im Bgld Florianiplatz" #input("Geben Sie den Namen der Ziel-Haltestelle ein: ")
     start_datetime =  "2024-10-20 14:30:00" #input("Geben Sie die Startzeit ein (Format: YYYY-MM-DD HH:MM:SS): ")
 
     # Lade die GTFS-Daten
@@ -113,3 +113,4 @@ if __name__ == "__main__":
         print(f"Ankunftszeit: {arrival_time} Uhr")
     else:
         print(f"Kein Weg von {start_stop_name} nach {end_stop_name} gefunden.")
+
