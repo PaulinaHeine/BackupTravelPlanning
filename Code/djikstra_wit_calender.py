@@ -58,6 +58,7 @@ def prepare_calendar_dates(calendar_dates):
 
 # Erstelle einen Graphen basierend auf den GTFS-Daten und Verfügbarkeit
 def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, date):
+    # TODO check if arival time < start time + time budget
     graph = defaultdict(list)
     stop_id_to_name = stops.set_index("stop_id")["stop_name"].to_dict()
 
@@ -154,7 +155,7 @@ if __name__ == "__main__":
 
     if arrival_time_minutes < float("inf"):
         arrival_time = minutes_to_time(arrival_time_minutes)
-        print(f"Kürzester Weg von {start_stop_name} nach {end_stop_name}:")
+        print(f"Shortest path from {start_stop_name} to {end_stop_name}:")
 
         # Ausgabe des vollständigen Weges mit Linie und Zeiten
         for i in range(0, len(path) - 2, 2):
@@ -162,10 +163,10 @@ if __name__ == "__main__":
             route_id, departure_time, arrival_time = path[i + 1]
             next_stop, _ = path[i + 2]
             print(
-                f"  • {current_stop} (Abfahrt: {minutes_to_time(departure_time)}) "
-                f"--> {next_stop} mit Linie {route_id} (Ankunft: {minutes_to_time(arrival_time)})"
+                f"  • {current_stop} (Departure: {minutes_to_time(departure_time)}) "
+                f"--> {next_stop} with line {route_id} (Arrival: {minutes_to_time(arrival_time)})"
             )
-        print(f"Endstation: {end_stop_name} (Ankunft: {minutes_to_time(arrival_time)} Uhr)")
+        print(f"Endstation: {end_stop_name} (Arrival: {minutes_to_time(arrival_time)} o'clock)")
     else:
-        print(f"Kein Weg von {start_stop_name} nach {end_stop_name} gefunden.")
+        print(f"No way found from {start_stop_name} to {end_stop_name}, sorry.")
 
