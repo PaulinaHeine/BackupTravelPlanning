@@ -121,22 +121,15 @@ def arrival_distribution(time):
     return max(1 - np.exp(-0.1 * (time - 5)), 0.1)  # Minimum 10% Chance
 
 
-def compute_reliability(arrival_distribution, departure_time):
+def compute_reliability(arrival_distribution, arrival_time, departure_time):
     """
-    Berechnet die Zuverlässigkeit eines einzelnen Segments gemäß Paper-Formel:
-
-    R_g = P(Y_arr_g ≤ τ_dep_h) * (1 - P(Y_arr_g > τ_dep_h))
-
-    :param arrival_distribution: Funktion für die Ankunftswahrscheinlichkeit
-    :param departure_time: Zeitpunkt der geplanten Abfahrt vom Transferpunkt
-    :return: Reliability-Wert für dieses Segment
+    Berechnet die Wahrscheinlichkeit, dass ein Transfer erfolgreich ist.
+    Ein Transfer ist erfolgreich, wenn der erste Zug rechtzeitig vor dem nächsten Zug ankommt.
     """
+    if arrival_time > departure_time:
+        return 0.0  # Transfer unmöglich, weil der erste Zug zu spät kommt
+    return arrival_distribution(arrival_time)  # Wahrscheinlichkeit, dass der erste Zug pünktlich ist
 
-
-    prob_arrival_on_time = arrival_distribution(departure_time)
-    missed_transfer_prob = 1 - prob_arrival_on_time  # P(Y_arr_g > τ_dep_h)
-
-    return prob_arrival_on_time * (1 - missed_transfer_prob)
 
 
 
@@ -186,8 +179,9 @@ def calculate_missed_transfer_probs(graph, arrival_distribution):
             missed_transfer_probs[(stop, neighbor)] = 1 - arrival_distribution(departure_time)
     return missed_transfer_probs
 
+
 def dijkstra_with_reliability(graph, start_name, end_name, start_time_minutes, arrival_distribution):
-    """Dijkstra-Algorithmus zur Suche der zuverlässigsten Route basierend auf Zeit."""
+    """Dijkstra-Algorithmus zur Suche der zuverlässigsten Route basierend auf Zeit und Reliability."""
     pq = [(start_time_minutes, start_name, [], 1.0)]  # (Abfahrtszeit, aktueller Knoten, Pfad, Reliability)
     visited = set()
 
@@ -200,19 +194,25 @@ def dijkstra_with_reliability(graph, start_name, end_name, start_time_minutes, a
 
         path = path + [(current_stop, current_time)]
         for neighbor, departure_time, arrival_time, route_id in graph[current_stop]:
-            if departure_time >= current_time:
+            if departure_time >= current_time:  # Prüfe, ob dieser Transfer zeitlich möglich ist
+
+                # Berechne die Wahrscheinlichkeit, dass der vorherige Zug pünktlich genug ankommt
+                transfer_reliability = compute_reliability(arrival_distribution, current_time, departure_time)
+
+                # Falls die Wahrscheinlichkeit 0 ist, bedeutet das, dass der Transfer unmöglich ist
+                if transfer_reliability > 0:
+                    new_reliability = min(reliability * transfer_reliability, 0.99)  # Verhindert immer 1.00 TODO hier ist irgendwas zach
 
 
-                rel = compute_reliability(arrival_distribution, departure_time)
-                heapq.heappush(pq, (
-                arrival_time, neighbor, path + [(route_id, departure_time, arrival_time)], reliability * rel))
+                    heapq.heappush(pq, (
+                        arrival_time, neighbor, path + [(route_id, departure_time, arrival_time)], new_reliability))
 
         if current_stop == end_name:
             return current_time, path, reliability
 
-
-
     return float("inf"), [], 0.0
+
+
 
 
 def find_best_reliable_itinerary(graph, start_name, end_name, start_time_minutes, arrival_distribution,
@@ -232,21 +232,13 @@ def find_best_reliable_itinerary(graph, start_name, end_name, start_time_minutes
 
 
 
-
-
-
-
-
-
-
-
 import sys
 import numpy as np
 
 if __name__ == "__main__":
     # 🚆 **Benutzereingabe**
     start_stop_name = "Schattendorf Kirchengasse"
-    end_stop_name = "Bad Sauerbrunn Bahnhof"
+    end_stop_name = "Flughafen Wien Bahnhof"
     start_datetime = "2024-10-16 14:30:00"
 
     # 🔹 Lade die GTFS-Daten
