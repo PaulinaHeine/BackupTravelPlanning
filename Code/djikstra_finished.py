@@ -1,9 +1,9 @@
-import sys
 import pandas as pd
 import heapq
 from collections import defaultdict
 from datetime import datetime
 from Code.import_data import import_data
+import sys  # Importiere sys für sys.exit()
 
 
 # Hilfsfunktion: Zeit in Minuten umwandeln
@@ -32,15 +32,8 @@ def is_service_available(service_id, date, calendar, calendar_dates):
     date_str = date.strftime("%Y%m%d")
     weekday = get_weekday(date)
 
-    # 🔹 1️⃣ Prüfe zuerst `calendar_dates` (Ausnahmen & extra Dienste)
-    if service_id in calendar_dates:
-        exceptions = calendar_dates[service_id]
-        for exception in exceptions:
-            if exception["date"] == date_str:
-                if exception["exception_type"] == 2:  # 🚀 Linie fährt EXTRA
-                    return True
-                elif exception["exception_type"] == 1:  # ❌ Linie fällt aus
-                    return False
+    # Prüfe Ausnahmen in calendar_dates # TODO
+    # TODO late evening start
 
     # Prüfe reguläre Dienste in calendar
     if service_id in calendar.index:
@@ -70,7 +63,7 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
     stop_id_to_name = stops.set_index("stop_id")["stop_name"].to_dict()
 
     trip_id_to_service = trips.set_index("trip_id")["service_id"].to_dict()
-    trip_id_to_route = trips.set_index("trip_id")["route_id"].to_dict()
+    trip_id_to_short_name = trips.set_index("trip_id")["trip_short_name"].to_dict()  # Mappe trip_id zu trip_short_name
 
     # Bereite die calendar_dates-Daten vor
     calendar_dates = prepare_calendar_dates(calendar_dates)
@@ -95,22 +88,21 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
             start_stop_id = stops_in_trip[i]
             end_stop_id = stops_in_trip[i + 1]
 
-            start_departure = time_to_minutes(departure_times[i])
-            end_arrival = time_to_minutes(arrival_times[i + 1])
+            start_departure = float(time_to_minutes(str(departure_times[i])))
+            end_arrival = float(time_to_minutes(str(arrival_times[i + 1])))
 
             travel_time = end_arrival - start_departure  # Dauer in Minuten
 
             if travel_time > 0:  # Vermeide ungültige Zeiten
                 start_stop_name = stop_id_to_name[start_stop_id]
                 end_stop_name = stop_id_to_name[end_stop_id]
-                route_id = trip_id_to_route[trip_id]  # Hole die Route/Linie
+                trip_short_name = trip_id_to_short_name[trip_id]  # Hole den trip_short_name
 
-                graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
+                graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, trip_short_name))
 
     return graph
 
-# Dijkstra-Algorithmus für den kürzesten Weg mit Startzeit
-def dijkstra_with_time(graph, start_name, end_name, start_time_minutes):
+def dijkstra_with_time(graph, start_name, end_name, start_time_minutes = float, time_budget = float):
     pq = [(start_time_minutes, start_name, [])]  # (Abfahrtszeit, aktueller Knoten, Pfad)
     visited = set()
 
@@ -126,8 +118,15 @@ def dijkstra_with_time(graph, start_name, end_name, start_time_minutes):
         # 🔹 Hier zuerst die Nachbarn durchgehen
         for neighbor, departure_time, arrival_time, route_id in graph[current_stop]:
             # Berücksichtige nur Verbindungen nach der aktuellen Zeit
+
+            departure_time = float(departure_time)
+            arrival_time = float(arrival_time)
+            time_budget = float(time_budget)
             if departure_time >= current_time:
-                heapq.heappush(pq, (arrival_time, neighbor, path + [(route_id, departure_time, arrival_time)]))
+                total_travel_time = float(arrival_time) - float(start_time_minutes)# Reisezeit berechnen
+
+                if float(total_travel_time) <= time_budget:  # Prüfe, ob innerhalb des Budgets
+                    heapq.heappush(pq, (arrival_time, neighbor, path + [(route_id, departure_time, arrival_time)]))
 
         # 🔹 Jetzt erst prüfen, ob das Ziel erreicht wurde
         if current_stop == end_name:
@@ -136,12 +135,13 @@ def dijkstra_with_time(graph, start_name, end_name, start_time_minutes):
     return float("inf"), []
 
 
-# Hauptprogramm
+# Hauptprogramm mit angepasster Ausgabe und Time Budget
 if __name__ == "__main__":
     # Benutzereingabe
     start_stop_name = "Schattendorf Kirchengasse"
     end_stop_name = "Bad Sauerbrunn Bahnhof"
     start_datetime = "2024-10-16 14:30:00"
+    time_budget = 2200  # Maximale Reisezeit in Minuten (z. B. 2 Stunden)
 
     # Lade die GTFS-Daten
     agency, stops, routes, trips, stop_times, calendar, calendar_dates = import_data()
@@ -158,23 +158,21 @@ if __name__ == "__main__":
         print("Ungültige Start- oder Zielhaltestelle!")
         sys.exit()
 
-    # Finde den kürzesten Weg basierend auf der Startzeit
-    arrival_time_minutes, path = dijkstra_with_time(graph, start_stop_name, end_stop_name, start_time_minutes)
+    # Finde den kürzesten Weg basierend auf der Startzeit und dem Zeitbudget
+    arrival_time_minutes, path = dijkstra_with_time(graph, start_stop_name, end_stop_name, start_time_minutes, time_budget)
 
     if arrival_time_minutes < float("inf"):
         arrival_time = minutes_to_time(arrival_time_minutes)
-        print(f"Shortest path from {start_stop_name} to {end_stop_name}:")
+        print(f"Kürzester Weg von {start_stop_name} nach {end_stop_name} (max. {time_budget} Min):")
 
-        # Ausgabe des vollständigen Weges mit Linie und Zeiten
         for i in range(0, len(path) - 2, 2):
             current_stop, current_time = path[i]
-            route_id, departure_time, arrival_time = path[i + 1]
+            trip_short_name, departure_time, arrival_time = path[i + 1]
             next_stop, _ = path[i + 2]
             print(
-                f"  • {current_stop} (Departure: {minutes_to_time(departure_time)}) "
-                f"--> {next_stop} with line {route_id} (Arrival: {minutes_to_time(arrival_time)})"
+                f"  • {current_stop} (Abfahrt: {minutes_to_time(departure_time)}) "
+                f"--> {next_stop} mit {trip_short_name} (Ankunft: {minutes_to_time(arrival_time)})"
             )
-        print(f"Endstation: {end_stop_name} (Arrival: {minutes_to_time(arrival_time)} o'clock)")
+        print(f"Endstation: {end_stop_name} (Ankunft: {arrival_time} Uhr)")
     else:
-        print(f"No way found from {start_stop_name} to {end_stop_name}, sorry.")
-
+        print(f"Kein Weg von {start_stop_name} nach {end_stop_name} gefunden, der innerhalb von {time_budget} Minuten liegt.")
