@@ -1,3 +1,5 @@
+import tkinter as tk
+from tkinter import messagebox
 import sys
 import pandas as pd
 import heapq
@@ -6,7 +8,7 @@ from datetime import datetime
 from scipy.stats import norm
 from Code.import_data import import_data
 
-# Hilfsfunktion: Zeit in Minuten umwandeln
+# Hilfsfunktionen
 def time_to_minutes(time_str):
     hours, minutes, seconds = map(int, time_str.split(":"))
     return hours * 60 + minutes + seconds / 60
@@ -23,6 +25,7 @@ def get_weekday(date):
 def is_service_available(service_id, date, calendar, calendar_dates):
     date_str = date.strftime("%Y%m%d")
     weekday = get_weekday(date)
+
     if service_id in calendar_dates:
         exceptions = calendar_dates[service_id]
         for exception in exceptions:
@@ -31,6 +34,7 @@ def is_service_available(service_id, date, calendar, calendar_dates):
                     return True
                 elif exception["exception_type"] == 1:
                     return False
+
     if service_id in calendar.index:
         service = calendar.loc[service_id]
         if service["start_date"] <= int(date_str) <= service["end_date"]:
@@ -85,7 +89,7 @@ def compute_transfer_probability_with_departure_delay(scheduled_arrival, schedul
     std_dev_diff = (std_dev_arrival**2 + std_dev_departure**2) ** 0.5
     return norm.cdf(0, loc=mu_departure - mu_arrival, scale=std_dev_diff)
 
-def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minutes, time_budget_minutes):
+def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minutes):
     pq = [(start_time_minutes, start_name, [], 1.0, None)]
     visited = set()
     while pq:
@@ -94,8 +98,6 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
             continue
         visited.add((current_stop, current_time))
         path = path + [(current_stop, current_time)]
-        if current_time - start_time_minutes > time_budget_minutes:
-            continue  # Prune Lösungen, die über dem Zeitbudget liegen
         for neighbor, departure_time, arrival_time, route_id in graph[current_stop]:
             if departure_time >= current_time:
                 transfer_reliability = 1.0 if last_route == route_id else compute_transfer_probability_with_departure_delay(arrival_time, departure_time)
@@ -106,29 +108,42 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
             return current_time, path, reliability
     return float("inf"), [], 0.0
 
-if __name__ == "__main__":
-    start_stop_name = "Schattendorf Kirchengasse"
-    end_stop_name = "Flughafen Wien Bahnhof"
-    start_datetime = "2024-10-16 14:30:00"
 
-    time_budget = "6:30"
-    time_budget_hours, time_budget_minutes = map(int, time_budget.split(":"))
-    time_budget_minutes = time_budget_hours * 60 + time_budget_minutes / 60
+# Funktion zur Berechnung der Route
+def calculate_route():
+    start_stop_name = start_entry.get()
+    end_stop_name = end_entry.get()
+    start_datetime = time_entry.get()
 
-    agency, stops, routes, trips, stop_times, calendar, calendar_dates = import_data()
-    start_time_obj = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M:%S")
+    if not start_stop_name or not end_stop_name or not start_datetime:
+        messagebox.showerror("Fehler", "Bitte alle Felder ausfüllen!")
+        return
+
+    try:
+        start_time_obj = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        messagebox.showerror("Fehler", "Falsches Datumsformat! Bitte in 'YYYY-MM-DD HH:MM:SS' eingeben.")
+        return
+
     start_time_minutes = start_time_obj.hour * 60 + start_time_obj.minute
+
+    # Daten importieren
+    agency, stops, routes, trips, stop_times, calendar, calendar_dates = import_data()
     graph = create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, start_time_obj)
+
     if start_stop_name not in graph or end_stop_name not in graph:
-        print("🚨 Ungültige Start- oder Zielhaltestelle!")
-        sys.exit()
+        messagebox.showerror("Fehler", "Ungültige Start- oder Zielhaltestelle!")
+        return
+
+    # Route berechnen
     arrival_time_minutes_fixed, path_fixed, reliability_fixed = dijkstra_with_reliability_fixed(
-        graph, start_stop_name, end_stop_name, start_time_minutes, time_budget_minutes
+        graph, start_stop_name, end_stop_name, start_time_minutes
     )
+
     # Ergebnis anzeigen
     if arrival_time_minutes_fixed < float("inf"):
         arrival_time_fixed = minutes_to_time(arrival_time_minutes_fixed)
-        print(f"\n📍 Optimierte zuverlässigste Route von {start_stop_name} nach {end_stop_name}:")
+        result_text = f"\n📍 Route von {start_stop_name} nach {end_stop_name}:\n"
 
         last_route = None
         grouped_routes = []
@@ -154,11 +169,36 @@ if __name__ == "__main__":
             dep_time = minutes_to_time(segment["departure_time"])
             route = segment["route_id"]
             stops = " → ".join([f"{stop} (Ankunft: {minutes_to_time(arr)})" for stop, arr in segment["stops"]])
-            print(f"  🚆 {start} (Abfahrt: {dep_time}) → {stops} mit Linie {route}")
+            result_text += f"  🚆 {start} (Abfahrt: {dep_time}) → {stops} mit Linie {route}\n"
 
-        print(f"\n🎯 Endstation: {end_stop_name} (Ankunft: {arrival_time_fixed})")
-        print(f"🔹 Gesamt-Zuverlässigkeit der Route: {reliability_fixed:.2f}\n")
+        result_text += f"\n🎯 Endstation: {end_stop_name} (Ankunft: {arrival_time_fixed})"
+        result_text += f"\n🔹 Gesamt-Zuverlässigkeit: {reliability_fixed:.2f}\n"
+
+        result_label.config(text=result_text)
     else:
-        print(f"\n⚠️ Keine zuverlässige Route von {start_stop_name} nach {end_stop_name} gefunden.\n")
+        messagebox.showerror("Fehler", "Keine zuverlässige Route gefunden.")
 
+# GUI erstellen
+root = tk.Tk()
+root.title("Routenfinder")
+root.geometry("600x400")
 
+tk.Label(root, text="Startbahnhof:").pack()
+start_entry = tk.Entry(root)
+start_entry.pack()
+
+tk.Label(root, text="Zielbahnhof:").pack()
+end_entry = tk.Entry(root)
+end_entry.pack()
+
+tk.Label(root, text="Startzeit (YYYY-MM-DD HH:MM:SS):").pack()
+time_entry = tk.Entry(root)
+time_entry.pack()
+
+calc_button = tk.Button(root, text="Route berechnen", command=calculate_route)
+calc_button.pack()
+
+result_label = tk.Label(root, text="", justify=tk.LEFT, anchor="w")
+result_label.pack()
+
+root.mainloop()
