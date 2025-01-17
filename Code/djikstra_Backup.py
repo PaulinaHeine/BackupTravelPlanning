@@ -77,6 +77,16 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
                 graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
     return graph
 
+def compute_transfer_probability_with_departure_delay(scheduled_arrival, scheduled_departure):
+    mean_arrival_delay = 3
+    std_dev_arrival = 1
+    mean_departure_delay = 2
+    std_dev_departure = 1
+    mu_arrival = scheduled_arrival + mean_arrival_delay
+    mu_departure = scheduled_departure + mean_departure_delay
+    std_dev_diff = (std_dev_arrival**2 + std_dev_departure**2) ** 0.5
+    return norm.cdf(0, loc=mu_departure - mu_arrival, scale=std_dev_diff)
+
 # Dijkstra mit Backup-Routenberechnung
 def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minutes, time_budget_minutes, exclude_routes=set()):
     pq = [(start_time_minutes, start_name, [], 1.0, None)]
@@ -91,7 +101,7 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
             continue
         for neighbor, departure_time, arrival_time, route_id in graph[current_stop]:
             if departure_time >= current_time and route_id not in exclude_routes:
-                transfer_reliability = 1.0 if last_route == route_id else 0.9  # Annahme: 90% Wahrscheinlichkeit für Umstieg
+                transfer_reliability = 1.0 if last_route == route_id else compute_transfer_probability_with_departure_delay(arrival_time, departure_time)
                 new_current_time = arrival_time
                 new_reliability = reliability * transfer_reliability
                 heapq.heappush(pq, (new_current_time, neighbor, path + [(route_id, departure_time, arrival_time)], new_reliability, route_id))
@@ -101,41 +111,6 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
 
 # Backup-Routen finden (Dijkstra an jeder Umstiegshaltestelle, ohne Primärroute)
 
-    def find_independent_backup_routes(graph, primary_path, start_time_minutes, time_budget_minutes):
-        independent_backup_routes = []
-        used_routes = {segment[0] for segment in primary_path if isinstance(segment, tuple)}
-        used_stops = {segment[0] for segment in primary_path if
-                      isinstance(segment, tuple)}  # Speichert genutzte Haltestellen
-
-        for i in range(1, len(primary_path) - 1, 2):
-            transfer_stop, transfer_time = primary_path[i - 1]
-
-            if transfer_stop in graph:
-                backup_time, backup_path, backup_reliability = dijkstra_without_used_routes(
-                    graph, transfer_stop, primary_path[-1][0], transfer_time, time_budget_minutes, used_routes
-                )
-
-                # Backup-Route nur aufnehmen, wenn sie keine bereits genutzten Linien oder Haltestellen enthält
-                if backup_time < float("inf"):
-                    unique_backup_path = []
-                    unique_routes = set()
-                    unique_stops = set()
-
-                    for segment in backup_path:
-                        if isinstance(segment, tuple) and len(segment) == 3:
-                            route, dep, arr = segment
-                            if route not in used_routes and dep not in used_stops and arr not in used_stops:
-                                unique_backup_path.append(segment)
-                                unique_routes.add(route)
-                                unique_stops.add(dep)
-                                unique_stops.add(arr)
-
-                    if unique_backup_path:
-                        independent_backup_routes.append((transfer_stop, unique_backup_path, backup_reliability))
-                        used_routes.update(unique_routes)  # Sperre genutzte Routen für nächste Backups
-                        used_stops.update(unique_stops)  # Sperre genutzte Haltestellen
-
-        return independent_backup_routes
 def find_backup_routes(graph, primary_path, start_time_minutes, time_budget_minutes):
     backup_routes = []
     used_routes = {segment[0] for segment in primary_path if isinstance(segment, tuple) and len(segment) == 3}
@@ -264,3 +239,5 @@ if __name__ == "__main__":
         print()
     else:
         print(f"\n⚠️ Keine zuverlässige Route von {start_stop_name} nach {end_stop_name} gefunden.\n")
+
+#stand umstiegszeiten müssen iun reliability mit ren, keine umstiege bei unter 2 min zeit

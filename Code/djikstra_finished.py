@@ -5,6 +5,8 @@ from collections import defaultdict
 from datetime import datetime
 from scipy.stats import norm
 from Code.import_data import import_data
+from scipy.stats import gamma
+import numpy as np
 
 # Hilfsfunktion: Zeit in Minuten umwandeln
 def time_to_minutes(time_str):
@@ -27,16 +29,16 @@ def is_service_available(service_id, date, calendar, calendar_dates):
         exceptions = calendar_dates[service_id]
         for exception in exceptions:
             if exception["date"] == date_str:
-                if exception["exception_type"] == 2:
+                if exception["exception_type"] == 2: #added
                     return True
-                elif exception["exception_type"] == 1:
+                elif exception["exception_type"] == 1: #reduced
                     return False
     if service_id in calendar.index:
         service = calendar.loc[service_id]
         if service["start_date"] <= int(date_str) <= service["end_date"]:
-            if service[weekday] == 1:
+            if service[weekday] == 1: # workiung
                 return True
-            elif service[weekday] == 0:
+            elif service[weekday] == 0: #not working
                 return False
 
 def prepare_calendar_dates(calendar_dates):
@@ -57,7 +59,7 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
     grouped = stop_times.groupby("trip_id")
     for trip_id, group in grouped:
         service_id = trip_id_to_service[trip_id]
-        if is_service_available(service_id, date, calendar, calendar_dates):
+        if is_service_available(service_id, date, calendar, calendar_dates): # TODO CHECK
             continue
         stops_in_trip = group["stop_id"].tolist()
         arrival_times = group["arrival_time"].tolist()
@@ -75,6 +77,133 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
                 graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
     return graph
 
+
+######
+
+
+
+def convert_itinerary_for_transfer(itinerary):
+    """
+    Konvertiert ein Dijkstra-Itinerary in ein passendes Format für Transferberechnungen.
+
+    Parameters:
+        itinerary (list of tuples): Pfad mit Haltestellen, Zeiten und Routen.
+
+    Returns:
+        list of tuples: Konvertiertes Itinerary mit Start/Ende, Zeiten und Routen-IDs.
+    """
+    converted = []
+    for i in range(len(itinerary)):
+        if i % 2 == 0:  # Haltestelle
+            stop_name = itinerary[i][0]
+            #current_time = itinerary[i][1]
+        if i % 2 != 0:
+            route_id = itinerary[i][0]
+            dep_time = itinerary[i][1]
+            arr_time = itinerary[i][2]
+
+
+            converted.append([stop_name, route_id, dep_time, arr_time])
+
+    return converted
+
+
+def is_transfer(i, itinerary):
+    """
+    Berechnet die Transferwahrscheinlichkeit für ein Itinerary, falls ein Transfer stattfindet.
+
+    Parameters:
+        itinerary (list of tuples): Liste der Reiseabschnitte (Legs) mit Ankunfts- und Abfahrtszeiten.
+
+    Returns:
+        float: Wahrscheinlichkeit des Transfers.
+    """
+    if len(itinerary) < 2:
+        return 1.0  # Kein Transfer notwendig bei einem einzelnen Leg
+
+    prev_leg = itinerary[i][1]
+    next_leg = itinerary[i+1][1]
+    if prev_leg != next_leg:
+        return True  # transfer
+
+
+# (1) und (2)
+def transfer_probability_with_delays(arrival_time, departure_time, delay_distribution = gamma(a=2, scale=1.5, random_seed = 42)):
+    """
+    Berechnet die Transferwahrscheinlichkeit unter Berücksichtigung von Verzögerungen
+    sowohl bei Ankunft als auch bei Abfahrt.
+
+    Parameters:
+        arrival_time (float): Planmäßige Ankunftszeit des vorherigen Beins.
+        departure_time (float): Planmäßige Abfahrtszeit des nächsten Beins.
+        delay_distribution (scipy.stats distribution): Verteilung der Verzögerungen.
+
+    Returns:
+        float: Wahrscheinlichkeit für einen erfolgreichen Transfer.
+    """
+
+    # Simuliere Verzögerungen für Ankunft und Abfahrt
+    arrival_delay = round(delay_distribution.rvs(seed = 20))
+    departure_delay = round(delay_distribution.rvs(seed = 3))
+
+    # Berechne effektive Ankunfts- und Abfahrtszeiten
+    effective_arrival_time = arrival_time + arrival_delay
+    effective_departure_time = departure_time + departure_delay
+
+    # Berechne den Zeitabstand
+    time_difference = effective_departure_time - effective_arrival_time
+
+    # Berechne die Wahrscheinlichkeit basierend auf dem Zeitabstand
+    # Maximalwert auf 1 beschränken, Minimalwert bei 0
+    if time_difference > 0:
+        #return min(1.0, time_difference / 10)  # Skalierung: Dividiert durch 10 (anpassbar)
+        probability = norm.cdf(time_difference, loc=1, scale=2)
+        return min(1.0, probability)  # Maximalwert auf 1 beschränken
+
+    else:
+        return 0.0  # Transfer nicht möglich
+
+# TODO speak to denis, random seed route id
+
+
+
+def transfer_probability(itinerary):
+    #itinerary = convert_itinerary_for_transfer(itinerary)
+    prob = 1
+    for i in range(len(itinerary)-1):
+        p = is_transfer(i, itinerary)
+        if p == False:
+            prob *= 1
+        elif p == True:
+            arrival_time = itinerary[i][3]
+            departure_time = itinerary[i+1][2]
+            prob *= transfer_probability_with_delays(arrival_time, departure_time, delay_distribution = gamma(a=2, scale=1.5))
+        return prob
+
+
+
+'''
+# Beispiel
+if __name__ == "__main__":
+    # Gamma-Verteilung für Verzögerungen
+    delay_distribution = gamma(a=2, scale=1.5)  # Formparameter = 2, Skalenparameter = 1.5
+
+    # Planmäßige Zeiten
+    arrival_time = 12  # Planmäßige Ankunftszeit
+    departure_time = 14  # Planmäßige Abfahrtszeit
+
+    # Berechne Transferwahrscheinlichkeit
+    transfer_prob = transfer_probability_with_delays(arrival_time, departure_time, delay_distribution)
+    print(f"Transfer Probability with Delays: {transfer_prob}")
+
+
+
+
+
+
+
+
+
 def compute_transfer_probability_with_departure_delay(scheduled_arrival, scheduled_departure):
     mean_arrival_delay = 3
     std_dev_arrival = 1
@@ -84,6 +213,8 @@ def compute_transfer_probability_with_departure_delay(scheduled_arrival, schedul
     mu_departure = scheduled_departure + mean_departure_delay
     std_dev_diff = (std_dev_arrival**2 + std_dev_departure**2) ** 0.5
     return norm.cdf(0, loc=mu_departure - mu_arrival, scale=std_dev_diff)
+'''
+
 
 def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minutes, time_budget_minutes):
     pq = [(start_time_minutes, start_name, [], 1.0, None)]
@@ -108,7 +239,9 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
 
 if __name__ == "__main__":
     start_stop_name = "Schattendorf Kirchengasse"
+    #start_stop_name ="Klagenfurt Hauptbahnhof"
     end_stop_name = "Flughafen Wien Bahnhof"
+    #end_stop_name = "Villach Hauptbahnhof"
     start_datetime = "2024-10-16 14:30:00"
 
     time_budget = "6:30"
