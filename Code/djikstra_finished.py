@@ -128,7 +128,7 @@ def is_transfer(i, itinerary):
 
 
 # (1) und (2)
-def transfer_probability_with_delays(arrival_time, departure_time, delay_distribution = gamma(a=2, scale=1.5, random_seed = 42)):
+def transfer_probability_with_delays(itinerary, arrival_time, departure_time, delay_distribution = gamma(a=2, scale=1.5, random_seed = 42)):
     """
     Berechnet die Transferwahrscheinlichkeit unter Berücksichtigung von Verzögerungen
     sowohl bei Ankunft als auch bei Abfahrt.
@@ -143,8 +143,8 @@ def transfer_probability_with_delays(arrival_time, departure_time, delay_distrib
     """
 
     # Simuliere Verzögerungen für Ankunft und Abfahrt
-    arrival_delay = round(delay_distribution.rvs(seed = 20))
-    departure_delay = round(delay_distribution.rvs(seed = 3))
+    arrival_delay = round(delay_distribution.rvs(random_state = 20))
+    departure_delay = round(delay_distribution.rvs(random_state = 3))
 
     # Berechne effektive Ankunfts- und Abfahrtszeiten
     effective_arrival_time = arrival_time + arrival_delay
