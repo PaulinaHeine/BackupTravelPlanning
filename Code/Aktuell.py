@@ -1,10 +1,15 @@
+
 import sys
-import pandas as pd
+import scipy.stats as stats
 import heapq
 from collections import defaultdict
-from datetime import datetime
+
 from scipy.stats import norm
+
 from Code.import_data import import_data
+
+from datetime import datetime, timedelta
+
 
 # Hilfsfunktionen (unverändert)
 
@@ -21,6 +26,9 @@ def get_weekday(date):
     weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     return weekdays[date.weekday()]
 
+
+'''
+#fast and weird
 def is_service_available(service_id, date, calendar, calendar_dates):
     date_str = date.strftime("%Y%m%d")
     weekday = get_weekday(date)
@@ -39,6 +47,36 @@ def is_service_available(service_id, date, calendar, calendar_dates):
                 return True
             elif service[weekday] == 0:
                 return False
+'''
+
+
+#correct and slow
+def is_service_available(service_id, start_time_obj, calendar, calendar_dates):
+    #date_str = date.strftime("%Y%m%d")
+    #date = date.date()
+    # Convert date to string in YYYYMMDD format
+    date_str = start_time_obj.strftime("%Y%m%d")
+    weekday = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][start_time_obj.weekday()]
+
+    # Step 1: Check for exceptions in calendar_dates
+    if service_id in calendar_dates["service_id"].values:
+        exceptions = calendar_dates[calendar_dates["service_id"] == service_id]
+        for _, exception in exceptions.iterrows():
+            if exception["date"] == int(date_str):
+                if exception["exception_type"] == 2:  # Service is added as an exception
+                    return True
+                elif exception["exception_type"] == 1:  # Service is removed as an exception
+                    return False
+
+    # Step 2: Check for regular service in calendar
+    if service_id in calendar["service_id"].values:
+        service = calendar[calendar["service_id"] == service_id]
+        # Check if date is within start_date and end_date
+        if int(service["start_date"].iloc[0]) <= int(date_str) <= int(service["end_date"].iloc[0]):
+            # Check if the service operates on this weekday
+            #is_available = (service[weekday].iloc[0] == 1)
+            return True
+    return False
 
 def prepare_calendar_dates(calendar_dates):
     grouped = calendar_dates.groupby("service_id")
@@ -48,7 +86,10 @@ def prepare_calendar_dates(calendar_dates):
         calendar_dates_dict[service_id] = exceptions
     return calendar_dates_dict
 
-# Graph erstellen
+######### Graph erstellen
+#Fast and weird
+'''
+
 def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, date):
     graph = defaultdict(list)
     stop_id_to_name = stops.set_index("stop_id")["stop_name"].to_dict()
@@ -57,9 +98,11 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
     calendar_dates = prepare_calendar_dates(calendar_dates)
     stop_times = stop_times.sort_values(by=["trip_id", "stop_sequence"])
     grouped = stop_times.groupby("trip_id")
+
+
     for trip_id, group in grouped:
         service_id = trip_id_to_service[trip_id]
-        if is_service_available(service_id, date, calendar, calendar_dates):
+        if not is_service_available(service_id, date, calendar, calendar_dates):
             continue
         stops_in_trip = group["stop_id"].tolist()
         arrival_times = group["arrival_time"].tolist()
@@ -76,7 +119,150 @@ def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_date
                 route_id = trip_id_to_route[trip_id]
                 graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
     return graph
+'''
+##correct and slow
 
+def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, date, time, end_time_obj):
+
+    graph = defaultdict(list)
+    stop_id_to_name = stops.set_index("stop_id")["stop_name"].to_dict()
+    # Filter for active trips today using is_service
+    trip_id_to_service = trips.set_index("trip_id")["service_id"].to_dict()
+    trip_id_to_route = trips.set_index("trip_id")["route_id"].to_dict()
+
+    calendar_dates_2 = prepare_calendar_dates(calendar_dates)
+    stop_times = stop_times.sort_values(by=["trip_id", "stop_sequence"])
+
+    #####
+    #Filter
+    #####
+
+    stop_times_copy = stop_times.copy()
+    # Filter out stops outside the time window
+    stop_times_copy["arrival_minutes"] = stop_times_copy["arrival_time"].apply(time_to_minutes)
+    stop_times_copy["departure_minutes"] = stop_times_copy["departure_time"].apply(time_to_minutes)
+
+    start_minutes = time_to_minutes(start_time_obj.strftime("%H:%M:%S"))
+    end_minutes = time_to_minutes(end_time_obj.strftime("%H:%M:%S"))
+
+    stop_times = stop_times_copy[
+        (stop_times_copy["arrival_minutes"] >= start_minutes) &
+        (stop_times_copy["departure_minutes"] <= end_minutes)
+        ]
+
+    print(f"Rows after time window filter: {len(stop_times)}")
+
+
+    #trip_id_to_service = trips.set_index("trip_id")["service_id"].to_dict()
+    stop_times["service_id"] = stop_times["trip_id"].map(trip_id_to_service)
+
+    grouped = stop_times.groupby("trip_id")
+    for trip_id, group in grouped:
+        service_id = trip_id_to_service[trip_id]
+        if not is_service_available(service_id, start_time_obj, calendar, calendar_dates): # TODO CHECK
+            continue
+        stops_in_trip = group["stop_id"].tolist()
+        arrival_times = group["arrival_time"].tolist()
+        departure_times = group["departure_time"].tolist()
+        for i in range(len(stops_in_trip) - 1):
+            start_stop_id = stops_in_trip[i]
+            end_stop_id = stops_in_trip[i + 1]
+            start_departure = time_to_minutes(departure_times[i])
+            end_arrival = time_to_minutes(arrival_times[i + 1])
+            travel_time = end_arrival - start_departure
+            if travel_time > 0:
+                start_stop_name = stop_id_to_name[start_stop_id]
+                end_stop_name = stop_id_to_name[end_stop_id]
+                route_id = trip_id_to_route[trip_id]
+                graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
+    return graph
+'''
+#new try denis V1
+def create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, date, time, end_time_obj):
+
+    graph = defaultdict(list)
+    stop_id_to_name = stops.set_index("stop_id")["stop_name"].to_dict()
+    # Filter for active trips today using is_service
+    trip_id_to_service = trips.set_index("trip_id")["service_id"].to_dict()
+    trip_id_to_route = trips.set_index("trip_id")["route_id"].to_dict()
+
+    calendar_dates_2 = prepare_calendar_dates(calendar_dates)
+    stop_times = stop_times.sort_values(by=["trip_id", "stop_sequence"])
+
+    #####
+    #Filter
+    #####
+
+    stop_times_copy = stop_times.copy()
+    # Filter out stops outside the time window
+    stop_times_copy["arrival_minutes"] = stop_times_copy["arrival_time"].apply(time_to_minutes)
+    stop_times_copy["departure_minutes"] = stop_times_copy["departure_time"].apply(time_to_minutes)
+
+    start_minutes = time_to_minutes(start_time_obj.strftime("%H:%M:%S"))
+    end_minutes = time_to_minutes(end_time_obj.strftime("%H:%M:%S"))
+
+    stop_times = stop_times_copy[
+        (stop_times_copy["arrival_minutes"] >= start_minutes) &
+        (stop_times_copy["departure_minutes"] <= end_minutes)
+        ]
+
+    print(f"Rows after time window filter: {len(stop_times)}")
+
+
+    # Precompute service availability
+    trip_id_to_service = trips.set_index("trip_id")["service_id"].to_dict()
+    # Ensure it's a new DataFrame, not a slice
+    #stop_times["service_id"] = stop_times["trip_id"].map(trip_id_to_service)
+    stop_times.loc[:, "service_id"] = stop_times["trip_id"].map(trip_id_to_service)
+
+    unique_service_ids = stop_times["service_id"].dropna().unique()
+    service_availability = {
+        service_id: is_service_available(service_id, date, calendar, calendar_dates)
+        for service_id in unique_service_ids
+    }
+
+    # Filter using precomputed availability
+    # Use .map() with a default value directly to avoid NaN
+    # Filter using precomputed availability
+    stop_times = stop_times[
+    stop_times["service_id"].map(lambda x: service_availability.get(x, False)).astype(bool)
+    ]
+    # TODO updated version
+
+    # Sortiere stop_times nach Trip und Stop-Sequence
+    stop_times = stop_times.sort_values(by=["trip_id", "stop_sequence"])
+    grouped = stop_times.groupby("trip_id")
+
+
+    grouped = stop_times.groupby("trip_id")
+    for trip_id, group in grouped:
+        service_id = trip_id_to_service[trip_id]
+        stops_in_trip = group["stop_id"].tolist()
+        arrival_times = group["arrival_time"].tolist()
+        departure_times = group["departure_time"].tolist()
+
+
+        # Füge Verbindungen zwischen aufeinanderfolgenden Haltestellen hinzu
+        for i in range(len(stops_in_trip) - 1):
+            start_stop_id = stops_in_trip[i]
+            end_stop_id = stops_in_trip[i + 1]
+
+            start_departure = time_to_minutes(departure_times[i])
+            end_arrival = time_to_minutes(arrival_times[i + 1])
+
+            travel_time = end_arrival - start_departure  # Dauer in Minuten
+
+            if travel_time > 0:  # Vermeide ungültige Zeiten
+                start_stop_name = stop_id_to_name[start_stop_id]
+                end_stop_name = stop_id_to_name[end_stop_id]
+                route_id = trip_id_to_route[trip_id]  # Hole die Route/Linie
+
+                graph[start_stop_name].append((end_stop_name, start_departure, end_arrival, route_id))
+
+    return graph
+'''
+
+'''
 def compute_transfer_probability_with_departure_delay(scheduled_arrival, scheduled_departure):
     mean_arrival_delay = 3
     std_dev_arrival = 1
@@ -86,8 +272,15 @@ def compute_transfer_probability_with_departure_delay(scheduled_arrival, schedul
     mu_departure = scheduled_departure + mean_departure_delay
     std_dev_diff = (std_dev_arrival**2 + std_dev_departure**2) ** 0.5
     return norm.cdf(0, loc=mu_departure - mu_arrival, scale=std_dev_diff)
+'''
 
-# TODO add reliablility per transfer and fix
+def compute_transfer_probability_with_departure_delay(transfer_time):
+    #transfer_window = departure_time - scheduled_arrival
+    #if transfer_window < 0:
+    #    return 0.1  # No chance of a successful transfer if arrival is after departure
+    return stats.gamma.cdf(transfer_time, a=2, scale=3)
+
+
 
 # Dijkstra mit Backup-Routenberechnung
 def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minutes, time_budget_minutes,
@@ -112,21 +305,25 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
         for neighbor, departure_time, arrival_time, route_id in graph[current_stop]:
             if departure_time >= current_time and route_id not in exclude_routes:
                 # Prüfe, ob es ein Umstieg ist (Linienwechsel)
-                if last_route is not None and last_route != route_id:
+                is_transfer = last_route is not None and last_route != route_id
+                if is_transfer:
                     # Mindestumstiegszeit von 5 Minuten nur bei Umstiegen
                     transfer_time = departure_time - current_time
-                    if transfer_time < 2:
+                    if transfer_time < MIN_TRANSFER_TIME:
                         continue  # Pruning: Zu wenig Zeit für Umstieg
 
                 # Berechne neue Zuverlässigkeit mit Transferwahrscheinlichkeit
-                transfer_reliability = 1.0 if last_route == route_id else compute_transfer_probability_with_departure_delay(
-                    arrival_time, departure_time)
+                if not is_transfer:  # Keine Zuverlässigkeitsänderung bei gleicher Linie
+                    transfer_reliability = 1.0
+                else:
+                    transfer_reliability = compute_transfer_probability_with_departure_delay(transfer_time)
+
                 new_current_time = arrival_time
                 new_reliability = reliability * transfer_reliability
 
                 heapq.heappush(pq, (
-                new_current_time, neighbor, path + [(route_id, departure_time, arrival_time)], new_reliability,
-                route_id))
+                    new_current_time, neighbor, path + [(route_id, departure_time, arrival_time)], new_reliability,
+                    route_id))
 
         if current_stop == end_name:
             return current_time, path, reliability
@@ -135,6 +332,23 @@ def dijkstra_with_reliability_fixed(graph, start_name, end_name, start_time_minu
 
 
 # Backup-Routen finden (Dijkstra an jeder Umstiegshaltestelle, ohne Primärroute)
+
+'''
+def find_backup_routes(djikstra_route, graph,)
+    identify all the transfer points
+    indicate the min reliablitity 
+    check transfer time
+    
+    increase transfer time
+    run djiksra with inreased transfer time (do this for every transfer point)
+    calcultae backup reliability
+    
+    
+go back to main
+    calculate reliability of primary
+'''
+
+
 
 def find_backup_routes(graph, primary_path, start_time_minutes, time_budget_minutes):
     backup_routes = []
@@ -177,6 +391,9 @@ def find_backup_routes(graph, primary_path, start_time_minutes, time_budget_minu
 
 # Hauptprogramm
 if __name__ == "__main__":
+
+    agency, stops, routes, trips, stop_times, calendar, calendar_dates = import_data()
+
     start_stop_name = "Schattendorf Kirchengasse"
     end_stop_name = "Flughafen Wien Bahnhof"
     start_datetime = "2024-12-20 14:30:00"
@@ -185,14 +402,25 @@ if __name__ == "__main__":
     time_budget_hours, time_budget_minutes = map(int, time_budget.split(":"))
     time_budget_minutes = time_budget_hours * 60 + time_budget_minutes / 60
 
-    agency, stops, routes, trips, stop_times, calendar, calendar_dates = import_data()
     start_time_obj = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M:%S")
     start_time_minutes = start_time_obj.hour * 60 + start_time_obj.minute
-    graph = create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, start_time_obj)
 
+    # In ein reines date-Objekt umwandeln
+    start_time_obj = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M:%S")
+    end_time_obj = start_time_obj + timedelta(minutes=time_budget_minutes)
+    date_obj = start_time_obj.date()
+
+    start_time_minutes = start_time_obj.hour * 60 + start_time_obj.minute
+
+    #fast and weird
+    #graph = create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, start_time_obj)
+
+    #slow and correct
+    graph = create_graph_with_schedule(stop_times, stops, trips, calendar, calendar_dates, start_time_obj,
+                                       start_time_obj, end_time_obj)
     if start_stop_name not in graph or end_stop_name not in graph:
         print("🚨 Ungültige Start- oder Zielhaltestelle!")
-        sys.exit()
+        #sys.exit()
 
     # Haupt-Dijkstra-Lauf
     arrival_time_minutes_fixed, path_fixed, reliability_fixed = dijkstra_with_reliability_fixed(
