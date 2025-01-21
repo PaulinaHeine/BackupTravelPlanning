@@ -4,7 +4,7 @@ import scipy.stats as stats
 import heapq
 from collections import defaultdict
 
-from scipy.stats import norm
+
 
 from Code.import_data import import_data
 
